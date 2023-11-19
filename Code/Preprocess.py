@@ -1,15 +1,17 @@
 import os
-import music21 as m21
 import json
+import music21 as m21
+import numpy as np
+import keras
+#create a new directory "PreprocessedErnDataset" and run the code
+KERN_DATASET_PATH = "/Users/keerthanagolla/Desktop/RICE/SEM-1/StatisticalML/MusicGenerator/LimitedDataset"
+SAVE_DIR = "/Users/keerthanagolla/Desktop/RICE/SEM-1/StatisticalML/MusicGenerator/PreprocessedErnDataset"
+SINGLE_FILE_DATASET = "/Users/keerthanagolla/Desktop/RICE/SEM-1/StatisticalML/MusicGenerator/PreprocessedErnDataset/File_PreprocessedDataset"
+MAPPING_PATH = "/Users/keerthanagolla/Desktop/RICE/SEM-1/StatisticalML/MusicGenerator/PreprocessedErnDataset/Mapping"
+SEQUENCE_LENGTH = 64
 
-Original_Dataset_Path = "/Users/keerthanagolla/Desktop/RICE/SEM-1/StatisticalML/MusicGenerator/Dataset"
-#KERN_DATASET_PATH="/Users/keerthanagolla/Desktop/RICE/SEM-1/StatisticalML/MusicGenerator/adl-piano-midi/Ambient/Ambient/Roger Eno"
-Preprocessed_Dataset_DIR = "/Users/keerthanagolla/Desktop/RICE/SEM-1/StatisticalML/MusicGenerator/PreprocessedDataset"
-Preprocessed_singlefile_path="/Users/keerthanagolla/Desktop/RICE/SEM-1/StatisticalML/MusicGenerator/PreprocessedDataset/File_PreprocessedDataset"
-Mapping_json_path="/Users/keerthanagolla/Desktop/RICE/SEM-1/StatisticalML/MusicGenerator/PreprocessedDataset/Mapping"
-Sequence_length = 64
 # durations are expressed in quarter length
-Accepted_Durations = [
+ACCEPTABLE_DURATIONS = [
     0.25, # 16th note
     0.5, # 8th note
     0.75,
@@ -23,6 +25,7 @@ Accepted_Durations = [
 
 def load_songs_in_kern(dataset_path):
     """Loads all kern pieces in dataset using music21.
+
     :param dataset_path (str): Path to dataset
     :return songs (list of m21 streams): List containing all pieces
     """
@@ -129,7 +132,7 @@ def preprocess(dataset_path):
     for i, song in enumerate(songs):
 
         # filter out songs that have non-acceptable durations
-        if not has_acceptable_durations(song, Accepted_Durations):
+        if not has_acceptable_durations(song, ACCEPTABLE_DURATIONS):
             continue
 
         # transpose songs to Cmaj/Amin
@@ -139,9 +142,13 @@ def preprocess(dataset_path):
         encoded_song = encode_song(song)
 
         # save songs to text file
-        save_path = os.path.join(Preprocessed_Dataset_DIR, str(i))
+        save_path = os.path.join(SAVE_DIR, str(i))
         with open(save_path, "w") as fp:
             fp.write(encoded_song)
+
+        if i % 10 == 0:
+            print(f"Song {i} out of {len(songs)} processed")
+
 
 def load(file_path):
     with open(file_path, "r") as fp:
@@ -176,6 +183,8 @@ def create_single_file_dataset(dataset_path, file_dataset_path, sequence_length)
         fp.write(songs)
 
     return songs
+
+
 def create_mapping(songs, mapping_path):
     """Creates a json file that maps the symbols in the song dataset onto integers
 
@@ -198,28 +207,65 @@ def create_mapping(songs, mapping_path):
         json.dump(mappings, fp, indent=4)
 
 
+def convert_songs_to_int(songs):
+    int_songs = []
+
+    # load mappings
+    with open(MAPPING_PATH, "r") as fp:
+        mappings = json.load(fp)
+
+    # transform songs string to list
+    songs = songs.split()
+
+    # map songs to int
+    for symbol in songs:
+        int_songs.append(mappings[symbol])
+
+    return int_songs
+
+
+def generate_training_sequences(sequence_length):
+    """Create input and output data samples for training. Each sample is a sequence.
+
+    :param sequence_length (int): Length of each sequence. With a quantisation at 16th notes, 64 notes equates to 4 bars
+
+    :return inputs (ndarray): Training inputs
+    :return targets (ndarray): Training targets
+    """
+
+    # load songs and map them to int
+    songs = load(SINGLE_FILE_DATASET)
+    int_songs = convert_songs_to_int(songs)
+
+    inputs = []
+    targets = []
+
+    # generate the training sequences
+    num_sequences = len(int_songs) - sequence_length
+    for i in range(num_sequences):
+        inputs.append(int_songs[i:i+sequence_length])
+        targets.append(int_songs[i+sequence_length])
+
+    # one-hot encode the sequences
+    vocabulary_size = len(set(int_songs))
+    # inputs size: (# of sequences, sequence length, vocabulary size)
+    inputs = keras.utils.to_categorical(inputs, num_classes=vocabulary_size)
+    targets = np.array(targets)
+
+    print(f"There are {len(inputs)} sequences.")
+
+    return inputs, targets
+
+
 def main():
-    print("started...")
-    # load songs
-    cwd = os.getcwd()
-    print(f"current path{cwd}")
-    songs = load_songs_in_kern(Original_Dataset_Path)
-    print(f"Loaded {len(songs)} songs.")
-    for song in songs:
-        print(f"Has acceptable duration? {has_acceptable_durations(song, Accepted_Durations)}")
-    preprocess(Original_Dataset_Path)
-
-    # transpose song
-    transposed_song = transpose(song)
-
-    #transposed_song.show()
-    print("done")
-    songs = create_single_file_dataset(Preprocessed_Dataset_DIR, Preprocessed_singlefile_path, Sequence_length)
-    create_mapping(songs, Mapping_json_path)
-    print("done")
+    preprocess(KERN_DATASET_PATH)
+    songs = create_single_file_dataset(SAVE_DIR, SINGLE_FILE_DATASET, SEQUENCE_LENGTH)
+    create_mapping(songs, MAPPING_PATH)
+    inputs, targets = generate_training_sequences(SEQUENCE_LENGTH)
+    print(inputs.shape)
+    print(targets.shape)
+    a=1
 
 
 if __name__ == "__main__":
     main()
-
-
